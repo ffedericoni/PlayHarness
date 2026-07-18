@@ -196,6 +196,74 @@ def generate_model(game_dir: str | Path, timeline_paths: list[Path],
         f"last failure:\n{detail}")
 
 
+def build_heuristic_prompt(code: str, spec: str, feedback: str | None) -> str:
+    feedback_block = ""
+    if feedback:
+        feedback_block = f"""
+
+A previous heuristic was evaluated in real games; use this feedback to write a
+stronger one:
+
+<feedback>
+{feedback}
+</feedback>"""
+
+    return f"""\
+This certified world model needs a strategy layer. Add ONE function to it:
+
+    heuristic(state, player) -> float
+
+It evaluates NON-TERMINAL states at alpha-beta search cutoffs (depth ~3), as
+an estimate of the final score margin from `player`'s viewpoint. It must be
+zero-sum symmetric (heuristic(s, a) == -heuristic(s, b)) and fast (called
+thousands of times per move). Use real strategic knowledge of this game —
+e.g. positional weights, mobility, stability — not just the raw current
+score, which is known to be a weak mid-game signal in many games.
+
+The game's rules:
+
+<rules_spec>
+{spec}
+</rules_spec>
+
+Current module (do NOT change any existing function — they are certified
+against recorded play; only add heuristic and any private helpers it needs):
+
+```python
+{code}
+```
+{feedback_block}
+Output ONLY the complete Python module (existing code + heuristic) in a
+single ```python code block."""
+
+
+def add_heuristic(game_dir: str | Path, timeline_paths: list[Path],
+                  feedback: str | None = None) -> Path:
+    """Ask Claude to add/improve heuristic() in world_model.py.
+
+    Re-certifies afterwards — the strategy layer must not disturb the
+    certified dynamics. Raises RuntimeError if it does and repair fails.
+    """
+    import anthropic
+
+    game_dir = Path(game_dir)
+    model_path = game_dir / "world_model.py"
+    spec = (game_dir / "rules_spec.json").read_text(encoding="utf-8")
+    code = model_path.read_text(encoding="utf-8")
+    client = anthropic.Anthropic()
+
+    print("Generating heuristic()" + (" (with game feedback)" if feedback else "") + " ...")
+    new_code = extract_code(_ask(client, build_heuristic_prompt(code, spec, feedback)))
+    model_path.write_text(new_code, encoding="utf-8")
+
+    green, detail = certify(model_path, timeline_paths)
+    print(f"  re-certification: {detail.splitlines()[0]}")
+    if not green:
+        # The strategy layer broke the dynamics — send it through repair.
+        return generate_model(game_dir, timeline_paths, start_code=new_code)
+    return model_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", required=True, help="Game name (dir under games/)")

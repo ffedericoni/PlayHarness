@@ -180,17 +180,17 @@ def is_terminal(state):
 
 
 def score(state, player):
-    """Final result from ``player``'s viewpoint: +1 win, -1 loss, 0 draw."""
+    """Final result from ``player``'s viewpoint: the signed disc differential
+    (own discs minus opponent's discs).  A positive value is a win margin, a
+    negative value a loss margin, and zero a draw.  This matches the recorded
+    ground-truth encoding, which reports the final disc margin rather than a
+    normalized +1/-1/0 outcome."""
     board = state["board"]
     black = sum(1 for v in board if v == "B")
     white = sum(1 for v in board if v == "W")
     my = black if player == 0 else white
     opp = white if player == 0 else black
-    if my > opp:
-        return 1.0
-    if my < opp:
-        return -1.0
-    return 0.0
+    return float(my - opp)
 
 
 def observation(state, player):

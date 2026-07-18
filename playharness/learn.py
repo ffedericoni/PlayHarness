@@ -25,9 +25,10 @@ from .selfplay import play_game
 
 
 def validate_winrate(model, num_games: int = 20, depth: int = 3,
-                     base_seed: int = 7) -> tuple[int, int, int]:
+                     base_seed: int = 7, use_heuristic: bool = False) -> tuple[int, int, int]:
     """Alpha-beta planner vs seeded random player. Returns (wins, draws, losses)."""
-    planner = alphabeta_policy(depth)
+    heuristic = (lambda m, s, p: m.heuristic(s, p)) if use_heuristic else None
+    planner = alphabeta_policy(depth, heuristic)
     wins = draws = losses = 0
     for game in range(num_games):
         rng = random.Random(base_seed + game)
@@ -81,15 +82,31 @@ def learn(game: str, num_timelines: int = 5, val_games: int = 40,
 
     print(f"== 4/4 planner validation (alpha-beta depth {val_depth}, "
           f"{val_games} games vs random) ==")
-    with SandboxedModel(model_path, call_timeout=60.0) as model:
-        wins, draws, losses = validate_winrate(model, num_games=val_games, depth=val_depth)
-    rate = wins / val_games
-    print(f"  W/D/L = {wins}/{draws}/{losses}  (win rate {rate:.0%})")
-    if rate > 0.95:
-        print("PHASE 1 EXIT CRITERIA MET: green backtest + >95% win rate vs random")
-        return 0
-    print("Win rate below the 95% exit criterion — consider a stronger heuristic "
-          "or deeper search (see plan/ portfolio).", file=sys.stderr)
+    from .modelgen import add_heuristic
+    for attempt in range(3):  # bare score -> heuristic -> improved heuristic
+        with SandboxedModel(model_path, call_timeout=60.0) as model:
+            use_h = model.supports("heuristic")
+            print(f"  cutoff evaluation: {'heuristic()' if use_h else 'score() (no heuristic yet)'}")
+            wins, draws, losses = validate_winrate(model, num_games=val_games,
+                                                   depth=val_depth, use_heuristic=use_h)
+        rate = wins / val_games
+        print(f"  W/D/L = {wins}/{draws}/{losses}  (win rate {rate:.0%})")
+        if rate > 0.95:
+            print("PHASE 1 EXIT CRITERIA MET: green backtest + >95% win rate vs random")
+            return 0
+        if attempt == 2:
+            break
+        feedback = None
+        if use_h:
+            feedback = (f"With your current heuristic() the alpha-beta planner (depth "
+                        f"{val_depth}) scored W/D/L = {wins}/{draws}/{losses} against a "
+                        f"uniformly random opponent — it must win >95%. Losses mean the "
+                        f"heuristic misjudges mid-game positions badly enough to lose "
+                        f"even to random play.")
+        add_heuristic(game_dir, timelines, feedback=feedback)
+
+    print("Win rate below the 95% exit criterion after heuristic attempts — "
+          "consider deeper search (see plan/ portfolio).", file=sys.stderr)
     return 2
 
 

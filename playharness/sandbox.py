@@ -67,6 +67,16 @@ class SandboxedModel:
     def observation(self, state: dict, player: int | None) -> dict:
         return self._call("observation", state, player)
 
+    # -- optional extensions ---------------------------------------------------
+
+    def supports(self, name: str) -> bool:
+        """Whether the model module defines an optional function (e.g. heuristic)."""
+        return bool(self._call("__has__", name))
+
+    def heuristic(self, state: dict, player: int) -> float:
+        """Optional cutoff evaluation; only call if supports('heuristic')."""
+        return self._call("heuristic", state, player)
+
     # -- plumbing -------------------------------------------------------------
 
     def _call(self, op: str, *args, timeout: float | None = None):

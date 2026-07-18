@@ -87,6 +87,8 @@ def main() -> None:
         try:
             if op == "ping":
                 result = "pong"
+            elif op == "__has__":
+                result = callable(model.get(args[0]))
             else:
                 fn = model.get(op)
                 if not callable(fn):
