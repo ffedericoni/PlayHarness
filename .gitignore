@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# bulky per-session artifacts (timelines ARE committed — see plan §3.6)
+games/*/screenshots/
+
+# secrets / browser sessions must never be committed
+*.storage_state.json
+bga_storage_state.json
+.env

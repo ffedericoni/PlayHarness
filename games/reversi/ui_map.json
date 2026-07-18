@@ -1,0 +1,16 @@
+{
+  "game": "reversi",
+  "actions": {
+    "play_disc": {
+      "selector": "#square_{x}_{y}",
+      "method": "click"
+    }
+  },
+  "confirm": {
+    "selectors": []
+  },
+  "observe": {
+    "log_entries": "#logs .log",
+    "possible_move_class": "possibleMove"
+  }
+}

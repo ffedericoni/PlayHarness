@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "playharness"
+version = "0.2.0"
+description = "Harness that learns and plays boardgames on BoardGameArena with an executable world model"
+requires-python = ">=3.10"
+dependencies = [
+    "playwright>=1.40",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+playharness = "playharness.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["playharness*"]
