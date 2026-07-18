@@ -160,9 +160,13 @@ def _ask(client, prompt: str) -> str:
 
 
 def generate_model(game_dir: str | Path, timeline_paths: list[Path],
-                   max_iterations: int = MAX_REPAIR_ITERATIONS) -> Path:
+                   max_iterations: int = MAX_REPAIR_ITERATIONS,
+                   start_code: str | None = None) -> Path:
     """Generate + repair world_model.py until the backtest is green.
 
+    ``start_code`` skips initial generation and enters the repair loop from
+    existing code (used when a previously certified model goes red — e.g.
+    after the backtest starts checking more of reality).
     Raises RuntimeError if certification is still red after the budget.
     """
     import anthropic
@@ -171,8 +175,11 @@ def generate_model(game_dir: str | Path, timeline_paths: list[Path],
     model_path = game_dir / "world_model.py"
     client = anthropic.Anthropic()
 
-    print("Generating world model from RulesSpec ...")
-    code = extract_code(_ask(client, build_generation_prompt(game_dir, timeline_paths)))
+    if start_code is not None:
+        code = start_code
+    else:
+        print("Generating world model from RulesSpec ...")
+        code = extract_code(_ask(client, build_generation_prompt(game_dir, timeline_paths)))
 
     for iteration in range(1, max_iterations + 1):
         model_path.write_text(code, encoding="utf-8")

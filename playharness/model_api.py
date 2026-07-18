@@ -23,8 +23,11 @@ Contract:
 
     score(state: dict, player: int) -> float
         Final result from ``player``'s viewpoint (zero-sum games should
-        return symmetric values; draws 0). Only meaningful on terminal
-        states, but must not raise on non-terminal ones.
+        return symmetric values; draws 0). When the game defines a graded
+        result (point or disc differential), return that margin — not just
+        the win/loss sign: planners use score() as the evaluation at search
+        cutoffs, and recorded games certify its exact values. Must not raise
+        on non-terminal states.
 
     observation(state: dict, player: int | None) -> dict
         What ``player`` can see of ``state``. ``player=None`` means the

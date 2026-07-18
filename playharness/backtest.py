@@ -111,4 +111,22 @@ def run_backtest(model: WorldModel, timeline: Timeline, viewpoint: int | None = 
                     entry["seq"], entry["action"], entry["observation"], predicted, paths))
             checked += 1
 
+        elif entry["type"] == "result":
+            # Final scores are ground truth too: score() must reproduce them,
+            # not just the winner's sign.
+            if state is None:
+                continue
+            expected = entry["scores"]
+            try:
+                predicted = {p: float(model.score(state, int(p))) for p in expected}
+            except Exception as exc:
+                return BacktestResult(False, checked, Counterexample(
+                    entry["seq"], None, expected, None, [], error=repr(exc)))
+            paths = diff_paths(expected, predicted)
+            if paths:
+                return BacktestResult(False, checked, Counterexample(
+                    entry["seq"], None, expected, predicted,
+                    [f"scores.{p}" for p in paths]))
+            checked += 1
+
     return BacktestResult(True, checked)

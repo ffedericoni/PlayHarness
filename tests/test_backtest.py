@@ -19,8 +19,8 @@ def test_green_on_faithful_replay(tictactoe, tmp_path):
     timeline = record_random_game(tictactoe, tmp_path / "timeline.jsonl")
     result = run_backtest(tictactoe, timeline)
     assert result.ok, result.describe()
-    # init + every transition was verified
-    assert result.checked == 1 + len(timeline.transitions())
+    # init + every transition + the final result entry were verified
+    assert result.checked == 2 + len(timeline.transitions())
     assert "GREEN" in result.describe()
 
 
@@ -89,6 +89,31 @@ def test_counterexample_on_wrong_initial_state(tictactoe, tmp_path):
     assert not result.ok
     assert result.checked == 0
     assert result.counterexample.mismatched_paths == ["to_move"]
+
+
+def test_counterexample_on_wrong_final_score(tictactoe, tmp_path):
+    # Scripted X win (top row) so the recorded result is decisive.
+    moves = iter([0, 3, 1, 4, 2])
+    scripted = lambda m, s, p: {"type": "place", "cell": next(moves)}
+    timeline = Timeline(tmp_path / "timeline.jsonl")
+    play_game(tictactoe, {0: scripted, 1: scripted}, timeline=timeline)
+
+    # A model that reproduces every transition but flattens the score.
+    flat_score = SimpleNamespace(
+        initial_state=tictactoe.initial_state,
+        legal_actions=tictactoe.legal_actions,
+        step=tictactoe.step,
+        is_terminal=tictactoe.is_terminal,
+        score=lambda state, player: 0.0,
+        observation=tictactoe.observation,
+    )
+
+    result = run_backtest(flat_score, timeline)
+    assert not result.ok
+    ce = result.counterexample
+    assert ce.expected == {"0": 1.0, "1": -1.0}
+    assert ce.predicted == {"0": 0.0, "1": 0.0}
+    assert sorted(ce.mismatched_paths) == ["scores.0", "scores.1"]
 
 
 def test_diff_paths():

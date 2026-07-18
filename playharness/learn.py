@@ -47,7 +47,7 @@ def validate_winrate(model, num_games: int = 20, depth: int = 3,
     return wins, draws, losses
 
 
-def learn(game: str, num_timelines: int = 5, val_games: int = 20,
+def learn(game: str, num_timelines: int = 5, val_games: int = 40,
           val_depth: int = 3, force: bool = False) -> int:
     game_dir = Path("games") / game
 
@@ -71,9 +71,10 @@ def learn(game: str, num_timelines: int = 5, val_games: int = 20,
         green, detail = certify(model_path, timelines)
         print(f"  existing model: {detail.splitlines()[0]}")
         if not green:
-            print("  existing model is red — regenerating")
+            print("  existing model is red — repairing from current code")
             from .modelgen import generate_model
-            generate_model(game_dir, timelines)
+            generate_model(game_dir, timelines,
+                           start_code=model_path.read_text(encoding="utf-8"))
     else:
         from .modelgen import generate_model
         generate_model(game_dir, timelines)
@@ -97,7 +98,7 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("game", help="Game name (dir under games/), e.g. reversi")
     parser.add_argument("--timelines", type=int, default=5)
-    parser.add_argument("--val-games", type=int, default=20)
+    parser.add_argument("--val-games", type=int, default=40)
     parser.add_argument("--val-depth", type=int, default=3)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
