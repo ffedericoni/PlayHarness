@@ -63,3 +63,53 @@ def random_policy(model: WorldModel, state: dict, player: int,
     if not actions:
         raise ValueError(f"player {player} has no legal actions")
     return (rng or random).choice(actions)
+
+
+INFINITY = float("inf")
+
+
+def alphabeta_value(model: WorldModel, state: dict, player: int, depth: int,
+                    heuristic: Callable[[WorldModel, dict, int], float] | None = None,
+                    alpha: float = -INFINITY, beta: float = INFINITY) -> float:
+    """Depth-limited alpha-beta value of ``state`` from ``player``'s viewpoint.
+
+    For games too large for exhaustive search. ``heuristic`` evaluates
+    non-terminal cutoff states; the default reuses ``model.score`` (fine for
+    games where the score is a meaningful running measure, e.g. disc
+    differential in Reversi). Handles turn skips (same player moving twice).
+    """
+    if model.is_terminal(state):
+        # Scale so real outcomes always dominate heuristic estimates.
+        return model.score(state, player) * 1_000_000.0
+    if depth <= 0:
+        return (heuristic or (lambda m, s, p: m.score(s, p)))(model, state, player)
+
+    mover = state["to_move"]
+    maximizing = mover == player
+    best = -INFINITY if maximizing else INFINITY
+    for action in model.legal_actions(state, mover):
+        value = alphabeta_value(model, model.step(state, action), player,
+                                depth - 1, heuristic, alpha, beta)
+        if maximizing:
+            best = max(best, value)
+            alpha = max(alpha, best)
+        else:
+            best = min(best, value)
+            beta = min(beta, best)
+        if beta <= alpha:
+            break
+    return best
+
+
+def alphabeta_policy(depth: int,
+                     heuristic: Callable[[WorldModel, dict, int], float] | None = None) -> Policy:
+    """Build a policy that picks the best action by depth-limited alpha-beta."""
+
+    def policy(model: WorldModel, state: dict, player: int) -> dict:
+        actions = model.legal_actions(state, player)
+        if not actions:
+            raise ValueError(f"player {player} has no legal actions")
+        return max(actions, key=lambda a: alphabeta_value(
+            model, model.step(state, a), player, depth - 1, heuristic))
+
+    return policy
