@@ -7,7 +7,16 @@ play, and plans inside it. Architecture inspired by
 [Schema](https://schema-harness.github.io/) — see
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design.
 
-## Status: Phase 1 — rulebook → certified model (offline)
+## Status: Phase 1 complete — rulebook → certified model (offline)
+
+**Exit criteria met for Reversi** (2026-07-18): starting from only
+`rulebook.md`, the pipeline extracted the spec, generated `world_model.py`,
+repaired it from backtest counterexamples (2 dynamics iterations + 1 score
+repair once the backtest began certifying recorded final scores), generated a
+strategy-layer `heuristic()`, and finished with a green backtest over all 310
+recorded entries and a **40/0/0 (100%)** win rate for depth-3 alpha-beta vs a
+random player. The learning curve is the git history of
+`games/reversi/world_model.py`.
 
 | Piece | Where | Role |
 |---|---|---|
