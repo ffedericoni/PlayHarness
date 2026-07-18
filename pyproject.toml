@@ -1,0 +1,19 @@
+[project]
+name = "playharness"
+version = "0.1.0"
+description = "A harness that uses Claude models to learn and play boardgames on BoardGameArena"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["playharness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
