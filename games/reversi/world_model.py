@@ -197,3 +197,142 @@ def observation(state, player):
     """Perfect-information game: everyone (and the omniscient observer) sees
     the full state."""
     return {"board": list(state["board"]), "to_move": state.get("to_move")}
+
+
+# ---------------------------------------------------------------------------
+# Strategy layer
+# ---------------------------------------------------------------------------
+
+# Classic Othello positional weight table (index = row * 8 + col).
+# Corners are prized; the squares diagonally/orthogonally adjacent to corners
+# (the "X-" and "C-" squares) are penalised because occupying them early tends
+# to hand the corner to the opponent.
+_POS_WEIGHTS = (
+    120, -20,  20,   5,   5,  20, -20, 120,
+    -20, -40,  -5,  -5,  -5,  -5, -40, -20,
+     20,  -5,  15,   3,   3,  15,  -5,  20,
+      5,  -5,   3,   3,   3,   3,  -5,   5,
+      5,  -5,   3,   3,   3,   3,  -5,   5,
+     20,  -5,  15,   3,   3,  15,  -5,  20,
+    -20, -40,  -5,  -5,  -5,  -5, -40, -20,
+    120, -20,  20,   5,   5,  20, -20, 120,
+)
+
+_CORNERS = (0, 7, 56, 63)
+
+
+def _evaluate_black(board):
+    """Strategic evaluation from Black's viewpoint (positive favours Black).
+
+    Combines several classic Othello signals whose relative weight shifts with
+    the game phase:
+
+      * positional value  -- corners good, X/C squares bad, edges decent;
+      * mobility          -- having more legal replies constrains the opponent;
+      * frontier discs    -- discs bordering empty squares are vulnerable, so
+                             fewer of them is better (a proxy for stability);
+      * corner control    -- corners are permanently stable and dominant;
+      * disc differential -- only decisive near the end of the game.
+
+    All component terms are antisymmetric in colour (Black minus White), so the
+    result is a proper zero-sum value.
+    """
+    black_discs = 0
+    white_discs = 0
+    pos = 0
+    black_front = 0
+    white_front = 0
+
+    for i in range(64):
+        v = board[i]
+        if v is None:
+            continue
+        if v == "B":
+            black_discs += 1
+            pos += _POS_WEIGHTS[i]
+        else:
+            white_discs += 1
+            pos -= _POS_WEIGHTS[i]
+
+        # Frontier detection: adjacent to at least one empty square.
+        r, c = divmod(i, 8)
+        for dr, dc in _DIRECTIONS:
+            rr, cc = r + dr, c + dc
+            if 0 <= rr < 8 and 0 <= cc < 8 and board[rr * 8 + cc] is None:
+                if v == "B":
+                    black_front += 1
+                else:
+                    white_front += 1
+                break
+
+    filled = black_discs + white_discs
+
+    # Mobility (normalised to [-100, 100]).
+    b_mob = len(_legal_cells(board, 0))
+    w_mob = len(_legal_cells(board, 1))
+    if b_mob + w_mob:
+        mobility = 100.0 * (b_mob - w_mob) / (b_mob + w_mob)
+    else:
+        mobility = 0.0
+
+    # Frontier: fewer frontier discs is better, so negate the differential.
+    if black_front + white_front:
+        frontier = -100.0 * (black_front - white_front) / (black_front + white_front)
+    else:
+        frontier = 0.0
+
+    # Corner control.
+    b_corner = sum(1 for c in _CORNERS if board[c] == "B")
+    w_corner = sum(1 for c in _CORNERS if board[c] == "W")
+    corner = 25.0 * (b_corner - w_corner)
+
+    # Disc differential (normalised).
+    if filled:
+        disc = 100.0 * (black_discs - white_discs) / filled
+    else:
+        disc = 0.0
+
+    pos_term = pos / 10.0
+
+    # Phase-dependent blending.
+    if filled <= 20:
+        # Opening: mobility & shape dominate; raw disc count is meaningless.
+        value = (1.0 * pos_term
+                 + 0.8 * mobility
+                 + 0.6 * frontier
+                 + 1.0 * corner
+                 + 0.0 * disc)
+    elif filled <= 56:
+        # Midgame: balanced, corners still king.
+        value = (1.0 * pos_term
+                 + 0.6 * mobility
+                 + 0.4 * frontier
+                 + 1.0 * corner
+                 + 0.2 * disc)
+    else:
+        # Endgame: the actual count is what wins; positional play fades.
+        value = (0.3 * pos_term
+                 + 0.2 * mobility
+                 + 0.1 * frontier
+                 + 1.0 * corner
+                 + 1.5 * disc)
+
+    return value
+
+
+def heuristic(state, player):
+    """Estimate the eventual score margin for ``player`` at a search cutoff.
+
+    Intended for evaluating NON-terminal states at alpha-beta depth limits.
+    Uses real Othello strategic knowledge (positional weights, mobility,
+    frontier/stability proxy, corner control, and phase-scaled disc count)
+    rather than the raw current disc differential, which is a weak mid-game
+    signal.
+
+    Zero-sum symmetric by construction: the position is scored from Black's
+    viewpoint via antisymmetric component terms, then negated for White, so
+    ``heuristic(s, 0) == -heuristic(s, 1)`` exactly.
+    """
+    board = state["board"]
+    black_value = _evaluate_black(board)
+    return black_value if player == 0 else -black_value

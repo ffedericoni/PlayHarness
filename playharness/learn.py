@@ -24,9 +24,14 @@ from .sandbox import SandboxedModel
 from .selfplay import play_game
 
 
-def validate_winrate(model, num_games: int = 20, depth: int = 3,
-                     base_seed: int = 7, use_heuristic: bool = False) -> tuple[int, int, int]:
-    """Alpha-beta planner vs seeded random player. Returns (wins, draws, losses)."""
+def validate_winrate(model_path, num_games: int = 20, depth: int = 3,
+                     base_seed: int = 7, use_heuristic: bool = False,
+                     call_timeout: float = 60.0) -> tuple[int, int, int]:
+    """Alpha-beta planner vs seeded random player. Returns (wins, draws, losses).
+
+    A fresh sandbox per game bounds each subprocess's cumulative CPU (search
+    funnels thousands of evaluations through it).
+    """
     heuristic = (lambda m, s, p: m.heuristic(s, p)) if use_heuristic else None
     planner = alphabeta_policy(depth, heuristic)
     wins = draws = losses = 0
@@ -34,7 +39,8 @@ def validate_winrate(model, num_games: int = 20, depth: int = 3,
         rng = random.Random(base_seed + game)
         rand = lambda m, s, p: random_policy(m, s, p, rng)
         seat = game % 2  # alternate colors
-        result = play_game(model, {seat: planner, 1 - seat: rand})
+        with SandboxedModel(model_path, call_timeout=call_timeout) as model:
+            result = play_game(model, {seat: planner, 1 - seat: rand})
         outcome = result.scores[seat]
         if outcome > 0:
             wins += 1
@@ -84,11 +90,11 @@ def learn(game: str, num_timelines: int = 5, val_games: int = 40,
           f"{val_games} games vs random) ==")
     from .modelgen import add_heuristic
     for attempt in range(3):  # bare score -> heuristic -> improved heuristic
-        with SandboxedModel(model_path, call_timeout=60.0) as model:
-            use_h = model.supports("heuristic")
-            print(f"  cutoff evaluation: {'heuristic()' if use_h else 'score() (no heuristic yet)'}")
-            wins, draws, losses = validate_winrate(model, num_games=val_games,
-                                                   depth=val_depth, use_heuristic=use_h)
+        with SandboxedModel(model_path, call_timeout=60.0) as probe:
+            use_h = probe.supports("heuristic")
+        print(f"  cutoff evaluation: {'heuristic()' if use_h else 'score() (no heuristic yet)'}")
+        wins, draws, losses = validate_winrate(model_path, num_games=val_games,
+                                               depth=val_depth, use_heuristic=use_h)
         rate = wins / val_games
         print(f"  W/D/L = {wins}/{draws}/{losses}  (win rate {rate:.0%})")
         if rate > 0.95:

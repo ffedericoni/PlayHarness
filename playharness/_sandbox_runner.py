@@ -22,6 +22,7 @@ from __future__ import annotations
 import builtins
 import importlib
 import json
+import os
 import resource
 import sys
 
@@ -32,7 +33,11 @@ ALLOWED_IMPORTS = frozenset({
     "re", "string", "types", "typing",
 })
 
-CPU_SECONDS = 60
+# Cumulative CPU for the whole subprocess. A model serving a search (thousands
+# of evaluations per move, many games per process) legitimately accumulates
+# CPU; runaway *individual* calls are killed by the parent's per-call
+# wall-clock timeout, so this is a backstop, not the primary guard.
+CPU_SECONDS = int(os.environ.get("PLAYHARNESS_SANDBOX_CPU", "900"))
 MEMORY_BYTES = 512 * 1024 * 1024
 
 
