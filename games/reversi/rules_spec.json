@@ -1,0 +1,35 @@
+{
+  "game_name": "Othello (Reversi)",
+  "players": {
+    "min": 2,
+    "max": 2
+  },
+  "setup": "An 8×8 board (64 squares); columns labelled a–h left to right, rows 1–8 top to bottom. 64 discs, each black on one face and white on the other. Initial position: White discs on d4 and e5; Black discs on e4 and d5. One player is Black, the other White. Black always moves first.",
+  "turn_structure": "Players alternate turns, making one move per turn, starting with Black. If a player has no legal move, their turn is forfeited (passed) and the opponent moves again; a player may not pass voluntarily if a legal move exists. The game ends when neither player can make a legal move.",
+  "actions": [
+    {
+      "name": "place_disc",
+      "preconditions": "It is the player's turn; the chosen square is empty; and placing a disc of the player's colour there outflanks (brackets) at least one unbroken row of one or more opposing discs — i.e., in at least one of the eight directions (horizontal, vertical, or diagonal), the adjacent square holds an opposing disc and continuing in that direction reaches a disc of the player's own colour with only opposing discs in between and no empty square.",
+      "effects": "A disc of the player's colour is placed on the chosen empty square. Every opposing disc lying in an unbroken bracketed row between the placed disc and a same-colour disc, in every applicable direction, is flipped to the player's colour. Only discs directly bracketed by this move are flipped; discs outflanked 'in passing' as a side effect of other flips are not flipped. Turn then passes to the opponent (unless the opponent must pass).",
+      "forced": true
+    },
+    {
+      "name": "pass",
+      "preconditions": "The player has no legal place_disc move available (no empty square would flip at least one opposing disc).",
+      "effects": "The player's turn is forfeited and passes to the opponent, who moves again. No discs are placed or flipped.",
+      "forced": true
+    }
+  ],
+  "objective": "The game ends when neither player can make a legal move (most commonly when all 64 squares are filled, but possibly earlier). Discs of each colour are counted; the player with the majority of discs showing their colour wins. Equal counts result in a draw. The winner's score is customarily recorded as their disc count, with empty squares awarded to the winner for tournament scoring.",
+  "randomness": "none",
+  "hidden_information": "none — perfect information",
+  "edge_cases": [
+    "A player who cannot move must pass, and the opponent moves again; passing is forbidden if any legal move exists.",
+    "Discs outflanked 'in passing' (a row bracketed only as a side effect of flips elsewhere) are not flipped.",
+    "A move that flips no opposing disc is illegal; discs cannot be placed on occupied squares.",
+    "The game can end before the board is full if neither player can flip any disc.",
+    "A player may end with zero discs on the board, in which case that player loses.",
+    "Corner squares, once taken, can never be flipped.",
+    "Equal disc counts result in a draw."
+  ]
+}

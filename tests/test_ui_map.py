@@ -1,13 +1,13 @@
 import pytest
 
 from playharness.bga.ui_map import UIMap, UIMapError
-from playharness.model_api import games_dir
+from tests.conftest import REPO_ROOT
 
 
-def test_selector_formatting():
-    ui_map = UIMap.load(games_dir() / "reversi" / "ui_map.json")
-    selector, method = ui_map.selector_for({"type": "play_disc", "x": 4, "y": 3})
-    assert selector == "#square_4_3"
+def test_reversi_map_resolves_place_action():
+    ui_map = UIMap.load(REPO_ROOT / "games" / "reversi" / "ui_map.json")
+    selector, method = ui_map.selector_for({"type": "place", "cell": 44}, {"x": 5, "y": 6})
+    assert selector == "#square_5_6"
     assert method == "click"
 
 
@@ -17,7 +17,7 @@ def test_unmapped_action_raises():
         ui_map.selector_for({"type": "teleport"})
 
 
-def test_missing_field_raises():
+def test_missing_template_field_raises():
     ui_map = UIMap({"game": "g", "actions": {"mv": {"selector": "#a_{x}"}}})
     with pytest.raises(UIMapError):
         ui_map.selector_for({"type": "mv"})

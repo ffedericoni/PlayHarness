@@ -1,8 +1,19 @@
-"""Append-only Timeline: the immutable ground-truth record of everything that happened.
+"""Append-only Timeline: the immutable record of what actually happened.
 
-One JSONL file per game (``games/<game>/timeline.jsonl``). The agent may revise
-hypotheses and notes, never this record — the API deliberately offers no way to
-rewrite or delete entries. The backtest and prediction checks replay it.
+One JSONL file per game session directory (``games/<game>/timeline.jsonl``).
+Entries are appended and never rewritten — hypotheses and notes may be revised,
+the record of reality may not. The backtest replays this file to certify a
+world model.
+
+Entry kinds (the ``type`` field):
+
+    init        {"config": ..., "observation": ...}   # game start
+    transition  {"player": ..., "action": ..., "observation": ...}
+    log         {"raw": ...}                          # raw BGA game-log lines
+    result      {"scores": {player: float, ...}}
+
+Every entry gets a monotonically increasing ``seq`` and a wall-clock ``ts``
+stamped at append time.
 """
 
 from __future__ import annotations
@@ -10,30 +21,26 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterator
 
 
 class Timeline:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._seq = sum(1 for _ in self.read()) if self.path.exists() else 0
+        self._next_seq = sum(1 for _ in self) if self.path.exists() else 0
 
-    @property
-    def seq(self) -> int:
-        """Number of records appended so far."""
-        return self._seq
-
-    def append(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Append one record, stamping it with a sequence number and timestamp."""
-        entry = {"seq": self._seq, "ts": time.time(), **record}
+    def append(self, type: str, **fields) -> dict:
+        """Append one entry and flush it to disk. Returns the stored entry."""
+        entry = {"seq": self._next_seq, "ts": time.time(), "type": type, **fields}
+        line = json.dumps(entry, sort_keys=True)
         with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False, sort_keys=False) + "\n")
-        self._seq += 1
+            f.write(line + "\n")
+            f.flush()
+        self._next_seq += 1
         return entry
 
-    def read(self) -> Iterator[dict[str, Any]]:
-        """Iterate over all records in append order."""
+    def __iter__(self) -> Iterator[dict]:
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -42,8 +49,11 @@ class Timeline:
                 if line:
                     yield json.loads(line)
 
-    def transitions(self) -> Iterator[dict[str, Any]]:
-        """Iterate over just the recorded state transitions."""
-        for rec in self.read():
-            if rec.get("type") == "transition":
-                yield rec
+    def __len__(self) -> int:
+        return self._next_seq
+
+    def entries(self, type: str | None = None) -> list[dict]:
+        return [e for e in self if type is None or e["type"] == type]
+
+    def transitions(self) -> list[dict]:
+        return self.entries("transition")

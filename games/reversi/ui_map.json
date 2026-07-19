@@ -1,7 +1,7 @@
 {
   "game": "reversi",
   "actions": {
-    "play_disc": {
+    "place": {
       "selector": "#square_{x}_{y}",
       "method": "click"
     }

@@ -13,7 +13,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..types import Action
+from typing import Any
+
+Action = dict[str, Any]
 
 
 class UIMapError(Exception):
@@ -38,14 +40,20 @@ class UIMap:
     def game(self) -> str:
         return self.data.get("game", "?")
 
-    def selector_for(self, action: Action) -> tuple[str, str]:
-        """Resolve an action to ``(selector, method)``. Raises UIMapError if unmapped."""
+    def selector_for(self, action: Action, extra_vars: dict[str, Any] | None = None) -> tuple[str, str]:
+        """Resolve an action to ``(selector, method)``. Raises UIMapError if unmapped.
+
+        ``extra_vars`` supplies derived template variables the action itself
+        doesn't carry (e.g. Reversi's flat ``cell`` index expanded to the
+        ``x``/``y`` BGA uses in its square ids).
+        """
         action_type = action.get("type")
         spec = (self.data.get("actions") or {}).get(action_type)
         if spec is None:
             raise UIMapError(f"no UI mapping for action type {action_type!r} in game {self.game!r}")
+        template_vars = {**action, **(extra_vars or {})}
         try:
-            selector = spec["selector"].format(**action)
+            selector = spec["selector"].format(**template_vars)
         except KeyError as e:
             raise UIMapError(f"action {action} missing field {e} required by selector template")
         return selector, spec.get("method", "click")
