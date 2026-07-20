@@ -11,6 +11,7 @@ non-consenting opponents (see IMPLEMENTATION_PLAN.md §3.3).
 from __future__ import annotations
 
 import logging
+import os
 
 from .config import BGAConfig
 
@@ -43,6 +44,11 @@ class BGASession:
         }
         if self.config.chromium_path:
             launch_kwargs["executable_path"] = self.config.chromium_path
+        # Chromium does not reliably honor proxy env vars on its own; managed
+        # environments (e.g. Claude Code remote) route egress through one.
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        if proxy:
+            launch_kwargs["proxy"] = {"server": proxy}
         self.browser = self._playwright.chromium.launch(**launch_kwargs)
 
         context_kwargs: dict = {}

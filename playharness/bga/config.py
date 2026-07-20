@@ -1,7 +1,9 @@
 """Configuration for the BGA adapter. Credentials come from the environment only.
 
 Environment variables:
-- ``BGA_EMAIL`` / ``BGA_PASSWORD`` — account credentials (never stored in the repo)
+- ``BGA_EMAIL`` (or ``BGA_USERID`` / ``BGA_USERNAME``) / ``BGA_PASSWORD`` —
+  account credentials (never stored in the repo; BGA's login form accepts
+  either the account's email or its username)
 - ``BGA_BASE_URL`` — defaults to https://boardgamearena.com
 - ``BGA_STORAGE_STATE`` — path for the persisted browser session
   (defaults to ~/.playharness/bga_storage_state.json)
@@ -58,7 +60,11 @@ class BGAConfig:
     def from_env(cls) -> "BGAConfig":
         cfg = cls()
         cfg.base_url = os.environ.get("BGA_BASE_URL", cfg.base_url).rstrip("/")
-        cfg.email = os.environ.get("BGA_EMAIL")
+        cfg.email = (
+            os.environ.get("BGA_EMAIL")
+            or os.environ.get("BGA_USERID")
+            or os.environ.get("BGA_USERNAME")
+        )
         cfg.password = os.environ.get("BGA_PASSWORD")
         if os.environ.get("BGA_STORAGE_STATE"):
             cfg.storage_state_path = Path(os.environ["BGA_STORAGE_STATE"])
