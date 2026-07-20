@@ -38,9 +38,13 @@ class BGASession:
         from playwright.sync_api import sync_playwright  # lazy: offline tests don't need it
 
         self._playwright = sync_playwright().start()
+        args = []
+        if os.geteuid() == 0:
+            args.append("--no-sandbox")  # Chromium refuses its sandbox as root
         launch_kwargs: dict = {
             "headless": self.config.headless,
             "slow_mo": self.config.slow_mo_ms,
+            "args": args,
         }
         if self.config.chromium_path:
             launch_kwargs["executable_path"] = self.config.chromium_path
@@ -49,14 +53,45 @@ class BGASession:
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         if proxy:
             launch_kwargs["proxy"] = {"server": proxy}
+            # TLS-terminating egress gateways commonly reset Chrome's TLS 1.3
+            # ClientHello (hybrid ML-KEM key share makes it multi-record);
+            # capping at 1.2 for the proxy hop keeps the handshake accepted.
+            args.append("--ssl-version-max=tls1.2")
         self.browser = self._playwright.chromium.launch(**launch_kwargs)
 
         context_kwargs: dict = {}
         if self.config.storage_state_path.exists():
             context_kwargs["storage_state"] = str(self.config.storage_state_path)
         self.context = self.browser.new_context(**context_kwargs)
+        self._pin_language_host()
         self.page = self.context.new_page()
         return self
+
+    def _pin_language_host(self) -> None:
+        """Rewrite direct www/apex navigations onto the base_url subdomain.
+
+        Note this cannot defeat BGA's own server-side canonical redirect (the
+        logged-in site lives on the apex domain), so egress policies must
+        allow ``boardgamearena.com`` itself — this rewrite only smooths over
+        stray links when a subdomain base_url is configured.
+        """
+        from urllib.parse import urlsplit
+
+        host = urlsplit(self.config.base_url).hostname or ""
+        if not host.endswith("boardgamearena.com") or host == "boardgamearena.com":
+            return
+
+        def rewrite_request(route):
+            new = route.request.url.replace("://www.boardgamearena.com", f"://{host}").replace(
+                "://boardgamearena.com", f"://{host}"
+            )
+            if new != route.request.url:
+                route.fulfill(status=302, headers={"location": new})
+            else:
+                route.fallback()
+
+        for pattern in ("**://boardgamearena.com/**", "**://www.boardgamearena.com/**"):
+            self.context.route(pattern, rewrite_request)
 
     def close(self) -> None:
         for closer in (self.context, self.browser):
@@ -127,21 +162,23 @@ class BGASession:
         if password is None:
             # Two-step form: submit the email first, then the password appears.
             submit = self._first_visible(cfg.submit_selectors)
-            if submit is None:
-                raise LoginError("no password field and no submit/continue button found")
-            submit.click()
-            page.wait_for_timeout(1500)
+            if submit is not None:
+                submit.click()
+            else:
+                username.press("Enter")
+            page.wait_for_timeout(3000)
             password = self._first_visible(cfg.password_selectors)
             if password is None:
                 raise LoginError("password field did not appear after submitting email")
         password.fill(cfg.password)
 
         submit = self._first_visible(cfg.submit_selectors)
-        if submit is None:
-            raise LoginError("no submit button found on the login form")
-        submit.click()
+        if submit is not None:
+            submit.click()
+        else:
+            password.press("Enter")
         page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(4000)
 
         if not self.is_logged_in():
             raise LoginError("login submitted but no logged-in marker found; check credentials")

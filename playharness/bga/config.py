@@ -34,21 +34,23 @@ class BGAConfig:
     # periodically; adjust here rather than in code.
     login_url_path: str = "/account"
     username_selectors: tuple[str, ...] = (
+        "input[placeholder='Email or username']",  # current Svelte login panel
         "#username_input",
         "input[name='email']",
         "input[type='email']",
-        "input[name='username']",
     )
     password_selectors: tuple[str, ...] = (
+        "input[placeholder='Password']",
         "#password_input",
-        "input[name='password']",
         "input[type='password']",
     )
     submit_selectors: tuple[str, ...] = (
+        "a.bga-button:has-text('Next')",  # the two-step flow's continue link
+        "a.bga-button:has-text('Log in')",
+        "button:has-text('Next')",
+        "button:has-text('Log in')",
         "#login_button",
-        "#submit_login_button",
         "button[type='submit']",
-        "input[type='submit']",
     )
     logged_in_selectors: tuple[str, ...] = (
         "a[href*='logout']",
