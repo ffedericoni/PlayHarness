@@ -79,7 +79,7 @@ Credentials come from the environment; the browser session is persisted to
 pip install -e .                        # adds playwright
 python -m playwright install chromium   # skip if Chromium is already provisioned
 
-export BGA_EMAIL=... BGA_PASSWORD=...
+export BGA_USERID=... BGA_PASSWORD=...   # BGA_EMAIL / BGA_USERNAME also accepted
 python -m playharness bga-login
 
 # Inspect a table's raw gamedatas + screenshot (useful for building UI maps):
@@ -109,7 +109,10 @@ halts the harness with a recorded counterexample and a screenshot (exit code
 Phase 2 known limitations: BGA selector/shape drift may require updating
 `ui_map.json` or `BGAConfig` selector candidates (use `bga-probe` to see what
 the page serves); table *creation* is manual — the harness joins and starts an
-existing table.
+existing table. Running against live BGA also has environment requirements
+(all BGA hosts reachable incl. the `ws-x*` realtime servers, a TLS-1.2 proxy
+cap, and a second player since Reversi has no bot) — see
+[docs/LIVE_BGA.md](docs/LIVE_BGA.md).
 
 ### Compliance
 
