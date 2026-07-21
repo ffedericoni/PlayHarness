@@ -31,6 +31,7 @@ class BGASession:
         self.browser = None
         self.context = None
         self.page = None
+        self._user: dict | None = None  # {id, name} once logged in
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -128,9 +129,32 @@ class BGASession:
                 continue
         return None
 
+    def _submit_from(self, field) -> None:
+        """Submit a login step. BGA's Svelte form reliably submits on Enter;
+        a page overlay routinely intercepts a plain click on the "Next" /
+        "Log in" control, so Enter is the dependable path."""
+        field.press("Enter")
+
     def is_logged_in(self) -> bool:
         assert self.page
         self.page.goto(self.config.base_url + "/", wait_until="domcontentloaded")
+        # BGA exposes the authenticated identity as window.globalUserInfos; an
+        # anonymous session reports name "Visitor" with a negative id. This is
+        # far more stable than the header markup, which BGA reworks often.
+        try:
+            self.page.wait_for_function(
+                "() => window.globalUserInfos && window.globalUserInfos.name",
+                timeout=15_000,
+            )
+            info = self.page.evaluate(
+                "() => ({id: window.globalUserInfos.id, name: window.globalUserInfos.name})"
+            )
+        except Exception:
+            info = None
+        if info and str(info.get("name", "")).lower() not in ("", "visitor"):
+            self._user = info
+            return True
+        # Fallback to legacy header markers if globalUserInfos is unavailable.
         return self._first_visible(self.config.logged_in_selectors) is not None
 
     def ensure_logged_in(self) -> None:
@@ -161,22 +185,14 @@ class BGASession:
         password = self._first_visible(cfg.password_selectors)
         if password is None:
             # Two-step form: submit the email first, then the password appears.
-            submit = self._first_visible(cfg.submit_selectors)
-            if submit is not None:
-                submit.click()
-            else:
-                username.press("Enter")
+            self._submit_from(username)
             page.wait_for_timeout(3000)
             password = self._first_visible(cfg.password_selectors)
             if password is None:
                 raise LoginError("password field did not appear after submitting email")
         password.fill(cfg.password)
 
-        submit = self._first_visible(cfg.submit_selectors)
-        if submit is not None:
-            submit.click()
-        else:
-            password.press("Enter")
+        self._submit_from(password)
         page.wait_for_load_state("domcontentloaded")
         page.wait_for_timeout(4000)
 
