@@ -79,6 +79,22 @@ def cmd_bga_login(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bga_create(args: argparse.Namespace) -> int:
+    from .bga import table as table_mod
+
+    with _make_session() as session:
+        session.ensure_logged_in()
+        table_id = table_mod.create_table(
+            session.page, args.game, mode=args.mode, force_manual=not args.auto_start
+        )
+        url = f"{session.config.base_url}/table?table={table_id}"
+        print(f"created table {table_id}")
+        print(f"  {url}")
+        print("  seat a second player (a 2nd account or yourself), then run:")
+        print(f"    python -m playharness bga-play {args.game} --table {table_id}")
+    return 0
+
+
 def cmd_bga_probe(args: argparse.Namespace) -> int:
     from .bga import observe as obs_mod
     from .bga import table as table_mod
@@ -169,6 +185,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("bga-login", help="log in to BGA and persist the session")
     p.set_defaults(func=cmd_bga_login)
+
+    p = sub.add_parser("bga-create", help="create a new (manual) table and print its id/URL")
+    p.add_argument("game", nargs="?", default="reversi")
+    p.add_argument("--mode", choices=["realtime", "async"], default="async",
+                   help="async (turn-based) suits the harness's reload-based play; "
+                        "players need not be online simultaneously")
+    p.add_argument("--auto-start", action="store_true",
+                   help="allow the table to auto-start (default: manual, so it never "
+                        "starts against a random opponent)")
+    p.set_defaults(func=cmd_bga_create)
 
     p = sub.add_parser("bga-probe", help="dump raw gamedatas + screenshot from a table")
     p.add_argument("--table", required=True, help="table URL or numeric table id")

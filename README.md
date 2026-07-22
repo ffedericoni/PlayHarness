@@ -85,8 +85,10 @@ python -m playharness bga-login
 # Inspect a table's raw gamedatas + screenshot (useful for building UI maps):
 python -m playharness bga-probe --table <table-id-or-url>
 
-# Play. Create the table in the BGA UI first (training mode, no clock),
-# then hand the harness its id or URL:
+# Create a table (turn-based, manual start — never auto-starts vs a random):
+python -m playharness bga-create reversi          # prints the table id + URL
+
+# Play. Seat a second player in the table's open seat, then:
 python -m playharness bga-play reversi --table <table-id-or-url>
 
 # Offline self-play with the same planner, no BGA needed:
@@ -108,10 +110,9 @@ halts the harness with a recorded counterexample and a screenshot (exit code
 
 Phase 2 known limitations: BGA selector/shape drift may require updating
 `ui_map.json` or `BGAConfig` selector candidates (use `bga-probe` to see what
-the page serves); table *creation* is manual — the harness joins and starts an
-existing table. Running against live BGA also has environment requirements
+the page serves). Running against live BGA also has environment requirements
 (all BGA hosts reachable incl. the `ws-x*` realtime servers, a TLS-1.2 proxy
-cap, and a second player since Reversi has no bot) — see
+cap) and needs a second player, since Reversi has no bot — see
 [docs/LIVE_BGA.md](docs/LIVE_BGA.md).
 
 ### Compliance

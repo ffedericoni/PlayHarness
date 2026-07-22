@@ -36,6 +36,10 @@ BGA is spread across several hosts. Behind a filtering/TLS-terminating proxy,
 | `x.boardgamearena.net` | static assets (JS, CSS, images) | the SPA to boot |
 | `ws-x3.boardgamearena.com`, `ws-x4.boardgamearena.com` | realtime notification stream (`/connection/http_stream`) | matchmaking, table start, live move push |
 
+Once all three host groups are allowlisted, the SPA boots normally and its
+realtime channel connects (`wss://ws-x3.boardgamearena.com/connection/websocket`);
+the "Application loading…" hang clears. Confirmed working in this environment.
+
 Two proxy-specific issues observed:
 
 1. **TLS reset on the ClientHello.** A TLS-terminating gateway may reset
@@ -55,6 +59,22 @@ Two proxy-specific issues observed:
    channel degraded, *provided the in-game client still boots*. This has not yet
    been confirmable here because table start itself needs the SPA.
 
+## Tables
+
+The harness creates and manages tables itself through BGA's request-token
+endpoints (verified live):
+
+```bash
+python -m playharness bga-create reversi   # prints a table id + URL
+```
+
+`bga-create` makes a turn-based (`async`) table with **manual start**, so it
+never begins a game against a random opponent — the game starts only once the
+intended second player is seated and start is triggered. Turn-based suits the
+harness's reload-based observe/act (players need not be online at the same
+time). `create_table` / `start_table` / `cancel_table` in
+`playharness/bga/table.py` wrap the endpoints.
+
 ## Opponent
 
 BGA Reversi has **no bot / solo / training-vs-AI mode** — a complete game needs
@@ -72,5 +92,8 @@ scope** for this harness (see the Compliance note in the README).
 
 - Login end-to-end; session persists and re-authenticates as the configured
   user with no re-login.
-- Blocked before a live game by (a) the realtime-host egress restrictions above
-  and (b) the need for a second player.
+- With all BGA hosts allowlisted, the SPA boots and the realtime websocket
+  connects — the earlier "Application loading…" hang is gone.
+- Table create / cancel work through the harness's own code against live BGA.
+- Remaining gap to a full game: a **second player** in the table's open seat
+  (see Opponent above). Everything up to "start the game" is automated.
