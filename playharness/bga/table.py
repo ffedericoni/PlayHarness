@@ -110,15 +110,42 @@ def start_table(page, table_id: str) -> None:
     logger.info("started table %s", table_id)
 
 
-def goto_table(page, base_url: str, table_ref: str, timeout_s: float = 180.0, poll_s: float = 2.0) -> None:
-    """Navigate to a table and wait until the game is running (``gameui`` present).
+def _table_id(base_url: str, table_ref: str) -> str:
+    m = re.search(r"table=(\d+)", str(table_ref))
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"\d+", str(table_ref)):
+        return str(table_ref)
+    raise TableError(f"cannot extract a table id from {table_ref!r}")
 
-    Clicks any lobby accept/start buttons that appear along the way. Times out
-    if the game hasn't started within ``timeout_s`` (e.g. waiting on an
-    opponent who never sits down).
+
+def game_client_url(page, base_url: str, table_ref: str) -> str:
+    """Build the in-game client URL for a running table.
+
+    The playable client lives at ``/<gameserver>/<game>?table=<id>`` — not the
+    ``/table?table=<id>`` info page (which redirects a non-active viewer to the
+    read-only ``/tableview``). The gameserver and game name come from
+    ``tableinfos``. Requires a logged-in page (any BGA page is fine as the
+    fetch origin).
     """
-    url = table_url(base_url, table_ref)
-    logger.info("navigating to table: %s", url)
+    table_id = _table_id(base_url, table_ref)
+    info = call_bga(page, "/table/table/tableinfos.html", {"id": table_id})
+    server = info.get("gameserver")
+    game = info.get("game_name")
+    if not server or not game:
+        raise TableError(f"tableinfos missing gameserver/game_name for table {table_id}: "
+                         f"server={server!r} game={game!r}")
+    return f"{base_url}/{server}/{game}?table={table_id}"
+
+
+def goto_table(page, base_url: str, table_ref: str, timeout_s: float = 180.0, poll_s: float = 2.0) -> None:
+    """Navigate to a table's game client and wait until it is running.
+
+    Resolves the gameserver client URL and loads it. Times out if ``gameui``
+    never appears (e.g. the game has not started because a seat is empty).
+    """
+    url = game_client_url(page, base_url, table_ref)
+    logger.info("navigating to game client: %s", url)
     page.goto(url, wait_until="domcontentloaded")
 
     deadline = time.monotonic() + timeout_s
