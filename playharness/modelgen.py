@@ -46,11 +46,22 @@ def _format_examples(timeline_path: Path) -> str:
     return "\n".join(lines)
 
 
-def build_generation_prompt(game_dir: Path, timeline_paths: list[Path]) -> str:
+def build_generation_prompt(game_dir: Path, timeline_paths: list[Path],
+                            extra_context: str | None = None) -> str:
     spec = (game_dir / "rules_spec.json").read_text(encoding="utf-8")
     ambiguities_path = game_dir / "ambiguities.md"
     ambiguities = (ambiguities_path.read_text(encoding="utf-8")
                    if ambiguities_path.exists() else "(none recorded)")
+    live_context = ""
+    if extra_context:
+        live_context = f"""
+Additional live context from the harness (the interface's declared action \
+wire format outranks any encoding you might invent):
+
+<live_context>
+{extra_context}
+</live_context>
+"""
 
     return f"""\
 You are writing the executable world model for a boardgame harness. Produce a \
@@ -86,7 +97,7 @@ model must reproduce (board representation, player numbering, turn handling):
 <recorded_play_examples>
 {_format_examples(timeline_paths[0])}
 </recorded_play_examples>
-
+{live_context}
 Your model will be certified by replaying {len(timeline_paths)} full recorded \
 games through `step()` and comparing `observation(state, None)` to every \
 recorded observation byte-for-byte. Study the examples carefully — especially \
@@ -161,7 +172,8 @@ def _ask(client, prompt: str) -> str:
 
 def generate_model(game_dir: str | Path, timeline_paths: list[Path],
                    max_iterations: int = MAX_REPAIR_ITERATIONS,
-                   start_code: str | None = None) -> Path:
+                   start_code: str | None = None,
+                   extra_context: str | None = None) -> Path:
     """Generate + repair world_model.py until the backtest is green.
 
     ``start_code`` skips initial generation and enters the repair loop from
@@ -179,7 +191,8 @@ def generate_model(game_dir: str | Path, timeline_paths: list[Path],
         code = start_code
     else:
         print("Generating world model from RulesSpec ...")
-        code = extract_code(_ask(client, build_generation_prompt(game_dir, timeline_paths)))
+        code = extract_code(_ask(client, build_generation_prompt(
+            game_dir, timeline_paths, extra_context=extra_context)))
 
     for iteration in range(1, max_iterations + 1):
         model_path.write_text(code, encoding="utf-8")

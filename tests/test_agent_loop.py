@@ -82,6 +82,10 @@ def test_bootstrap_without_model(tmp_path, tictactoe):
 
     assert theorizer.triggers == ["no-model"]
     assert theorizer.calls[0][2] is None          # no start_code yet
+    # The interface's action wire format is declared to the theorizer:
+    # rejections reveal nothing, so a wrong encoding could never be repaired.
+    assert "Interface:" in theorizer.calls[0][1]
+    assert "{'type': 'place', 'cell': 0}" in theorizer.calls[0][1]
     assert report.mispredictions == 0 and report.rejections == 0
     assert report.scores                          # game reached a result
     entries = Timeline(report.timeline_path).entries()
@@ -122,6 +126,7 @@ def test_rejection_reaches_theorizer_as_live_feedback(tmp_path, tictactoe):
     assert theorizer.triggers == ["rejection"]
     _, detail, _ = theorizer.calls[0]
     assert "REJECTED" in detail
+    assert "Interface:" in detail                 # wire format rides along
     log_entries = Timeline(report.timeline_path).entries("log")
     assert len(log_entries) == 1
     assert log_entries[0]["raw"]["rejected_action"] == {"type": "place", "cell": 0}

@@ -60,7 +60,7 @@ def claude_theorizer(game_dir: Path, timeline_paths: list[Path],
     from .modelgen import generate_model, repair_with_feedback
 
     if start_code is None:
-        generate_model(game_dir, timeline_paths)
+        generate_model(game_dir, timeline_paths, extra_context=detail)
     elif trigger in ("rejection", "no-actions"):
         # Not visible to the backtest — must reach the repair prompt directly.
         repair_with_feedback(game_dir, timeline_paths, detail)
@@ -229,10 +229,17 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
         model = SandboxedModel(model_path, call_timeout=call_timeout)
         state = _replay(model, timeline)
 
+    # The action wire format is interface knowledge, not hidden dynamics —
+    # rejections deliberately reveal nothing, so it must be declared up front
+    # or a wrong encoding could never be repaired from live play alone.
+    spec_fn = getattr(env, "action_spec", None)
+    interface_note = f"\nInterface: {spec_fn()}" if callable(spec_fn) else ""
+
     # Certify before the first plan: backtest gates planning.
     if not model_path.exists():
         deliberate("no-model", "no world_model.py yet — generate one from the "
-                               "rules spec and the reality recorded so far")
+                               "rules spec and the reality recorded so far"
+                               + interface_note)
     else:
         green, detail = certify(model_path, all_paths, call_timeout=call_timeout)
         if not green:
@@ -256,7 +263,8 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
                 deliberate("no-actions",
                            f"Live play failure: reality awaits our move (player "
                            f"{env.agent_seat}) but legal_actions() returned none. "
-                           f"Current recorded observation: {last_obs}")
+                           f"Current recorded observation: {last_obs}"
+                           + interface_note)
                 reopen()
                 continue
             action = policy(model, state, env.agent_seat)
@@ -273,8 +281,8 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
                 deliberate("rejection",
                            f"Live play failure: reality REJECTED action {action!r} "
                            f"({exc}) which legal_actions() offered — the model's "
-                           f"precondition for it is wrong. Current recorded "
-                           f"observation: {last_obs}")
+                           f"precondition or encoding for it is wrong. Current "
+                           f"recorded observation: {last_obs}" + interface_note)
                 reopen()
                 continue
             report.moves += 1

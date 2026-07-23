@@ -42,6 +42,17 @@ class TransitionEvent:
 class Environment(Protocol):
     agent_seat: int
 
+    def action_spec(self) -> str:
+        """Describe the wire format actions must be committed in.
+
+        The action encoding belongs to the interface, not to the game's
+        hidden dynamics: on BGA it is fixed by the harness's own UI map, and
+        the table visibly offers the legal opening moves before the first
+        act. So declaring it is observation, not leaked rules — while the
+        *preconditions and effects* of actions still have to be learned
+        from recorded play."""
+        ...
+
     def reset(self) -> tuple[dict, dict, list[TransitionEvent]]:
         """Start the game. Returns ``(config, initial_observation, events)``
         where ``events`` are opponent moves played before the agent's first
@@ -82,6 +93,17 @@ class ReferenceEnv:
         self._state: dict | None = None
         self._moves = 0
         self._seen_players: set[int] = {agent_seat}
+
+    def action_spec(self) -> str:
+        """The interface's opening offer: example actions in their exact wire
+        format — what a player sees on the table before the first move."""
+        state = self.reference.initial_state(self.config)
+        mover = state.get("to_move")
+        examples = ([] if mover is None
+                    else self.reference.legal_actions(state, mover))
+        return ("Actions are committed to the interface as JSON dicts. "
+                "These are the exact actions the interface offers in the "
+                f"opening position (encoding is fixed): {examples[:6]}")
 
     def reset(self) -> tuple[dict, dict, list[TransitionEvent]]:
         self._state = self.reference.initial_state(self.config)
