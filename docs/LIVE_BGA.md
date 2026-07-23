@@ -88,12 +88,41 @@ a second player. Options, in order of preference for research use:
 Public matchmaking pairs you with a random, non-consenting human and is **out of
 scope** for this harness (see the Compliance note in the README).
 
-## Verified so far
+## Phase 2 exit criterion — MET
 
-- Login end-to-end; session persists and re-authenticates as the configured
-  user with no re-login.
+On 2026-07-23 the harness played a **complete, legal game of Reversi on live
+BGA, unassisted**, on an unranked turn-based table (PlayHarness as White vs a
+consenting human, Caronte, as Black). Record:
+`games/reversi/timelines/bga_887637116.jsonl`.
+
+- **Result: PlayHarness won 42–22** (29 of our moves committed).
+- **Every per-step prediction check was green** — for all 29 of our moves the
+  world model's predicted successor matched BGA's observed board exactly; no
+  mismatch ever fired.
+- **Offline certification**: replaying the recorded real-board observations,
+  the world model reproduces **59/59** board-to-board transitions as legal
+  model transitions, and `score()` reproduces BGA's final panel to the disc
+  (Black 22 / White 42 → margin ∓20). The model is certified against real
+  BGA play, not just self-play.
+
+The one navigation bug live testing surfaced — the game client lives at
+`/<gameserver>/<game>?table=<id>`, not `/table?table=<id>` — is fixed in
+`table.py::game_client_url`. The observation normalizer, the `#square_{x}_{y}`
+UI map, and the world model all matched BGA's real Reversi `gamedatas`
+first try.
+
+Known refinement: because the harness joined after Black's opening move, the
+recorded timeline starts mid-game (no `init` entry) rather than as one clean
+`init → … → result` chain, so `run_backtest` can't replay it from the top as-is
+— certification above walks the observed boards directly. A future pass should
+seed the timeline from `initial_state` and infer the opening move so recorded
+BGA games are `run_backtest`-clean end to end.
+
+## Verified
+
+- Login end-to-end; session persists and re-authenticates with no re-login.
 - With all BGA hosts allowlisted, the SPA boots and the realtime websocket
   connects — the earlier "Application loading…" hang is gone.
-- Table create / cancel work through the harness's own code against live BGA.
-- Remaining gap to a full game: a **second player** in the table's open seat
-  (see Opponent above). Everything up to "start the game" is automated.
+- Table create / cancel / enter (via gameserver URL) all work through the
+  harness's own code against live BGA.
+- A full game plays end to end with live per-step certification (above).
