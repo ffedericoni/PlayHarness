@@ -23,8 +23,13 @@ import builtins
 import importlib
 import json
 import os
-import resource
 import sys
+
+try:
+    import resource  # POSIX only
+except ImportError:  # Windows: no rlimits; the parent's per-call wall-clock
+    resource = None  # timeout remains the primary guard on runaway code
+
 
 # Modules generated world models may import. Everything else is refused.
 ALLOWED_IMPORTS = frozenset({
@@ -42,6 +47,8 @@ MEMORY_BYTES = 512 * 1024 * 1024
 
 
 def _apply_limits() -> None:
+    if resource is None:
+        return
     resource.setrlimit(resource.RLIMIT_CPU, (CPU_SECONDS, CPU_SECONDS))
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_BYTES, MEMORY_BYTES))
     resource.setrlimit(resource.RLIMIT_NOFILE, (8, 8))

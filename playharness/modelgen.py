@@ -196,6 +196,28 @@ def generate_model(game_dir: str | Path, timeline_paths: list[Path],
         f"last failure:\n{detail}")
 
 
+def repair_with_feedback(game_dir: str | Path, timeline_paths: list[Path],
+                         feedback: str) -> Path:
+    """One repair call driven by live-play evidence the backtest cannot see.
+
+    The backtest certifies ``step``/``observation``/``score`` against recorded
+    reality, but never calls ``legal_actions`` — so a model that offers
+    illegal moves (or none at all) can stay green while failing live play.
+    Rejections from reality arrive here as ``feedback``; after the repair
+    call, the normal certify/repair loop keeps the dynamics green.
+    """
+    import anthropic
+
+    game_dir = Path(game_dir)
+    model_path = game_dir / "world_model.py"
+    code = model_path.read_text(encoding="utf-8")
+    client = anthropic.Anthropic()
+
+    print("Repairing from live-play feedback ...")
+    new_code = extract_code(_ask(client, build_repair_prompt(code, feedback)))
+    return generate_model(game_dir, timeline_paths, start_code=new_code)
+
+
 def build_heuristic_prompt(code: str, spec: str, feedback: str | None) -> str:
     feedback_block = ""
     if feedback:

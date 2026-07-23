@@ -10,10 +10,10 @@ self-play code do not care which kind they are given.
 from __future__ import annotations
 
 import json
-import os
-import select
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 
@@ -36,7 +36,7 @@ class SandboxedModel:
         self.model_path = str(model_path)
         self.call_timeout = call_timeout
         self._next_id = 0
-        self._buffer = b""
+        self._lines: queue.Queue[bytes | None] = queue.Queue()
         self._proc = subprocess.Popen(
             [sys.executable, "-m", "playharness._sandbox_runner", self.model_path],
             stdin=subprocess.PIPE,
@@ -44,6 +44,10 @@ class SandboxedModel:
             stderr=subprocess.PIPE,
             cwd=str(Path(__file__).resolve().parent.parent),
         )
+        # A thread pumps stdout lines into a queue: portable timed reads
+        # (select() only handles pipes on POSIX, and this must run on Windows).
+        self._reader = threading.Thread(target=self._pump_stdout, daemon=True)
+        self._reader.start()
         # Fail fast on models that die at import (banned imports, syntax errors).
         self._call("ping", timeout=self.call_timeout)
 
@@ -97,25 +101,20 @@ class SandboxedModel:
             raise SandboxError(f"{op} failed in sandbox: {reply.get('error')}")
         return reply["result"]
 
+    def _pump_stdout(self) -> None:
+        for line in iter(self._proc.stdout.readline, b""):
+            self._lines.put(line)
+        self._lines.put(None)  # EOF sentinel
+
     def _read_line(self, timeout: float) -> bytes:
         """Read one newline-terminated reply, enforcing a wall-clock budget."""
-        import time
-
-        deadline = time.monotonic() + timeout
-        fd = self._proc.stdout.fileno()
-        while b"\n" not in self._buffer:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                self.close(kill=True)
-                raise ModelTimeout(f"sandboxed call exceeded {timeout:.1f}s; process killed")
-            ready, _, _ = select.select([fd], [], [], remaining)
-            if not ready:
-                continue
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                raise SandboxError(f"sandbox process closed stdout: {self._stderr_tail()}")
-            self._buffer += chunk
-        line, self._buffer = self._buffer.split(b"\n", 1)
+        try:
+            line = self._lines.get(timeout=timeout)
+        except queue.Empty:
+            self.close(kill=True)
+            raise ModelTimeout(f"sandboxed call exceeded {timeout:.1f}s; process killed") from None
+        if line is None:
+            raise SandboxError(f"sandbox process closed stdout: {self._stderr_tail()}")
         return line
 
     def _stderr_tail(self) -> str:
