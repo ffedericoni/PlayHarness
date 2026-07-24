@@ -20,6 +20,8 @@ env/
 # Environment / secrets
 .env
 .env.*
+# BGA browser sessions must never be committed
+*storage_state.json
 
 # Testing / coverage
 .coverage
@@ -38,3 +40,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# bulky BGA session artifacts (timelines ARE committed — see plan §3.6)
+games/*/screenshots/

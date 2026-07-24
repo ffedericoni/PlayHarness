@@ -7,7 +7,16 @@ play, and plans inside it. Architecture inspired by
 [Schema](https://schema-harness.github.io/) — see
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design.
 
-## Status: Phase 3 complete — exit criterion met from the rulebook alone
+## Status: Phases 2 & 3 integrated — live BGA adapter + full Schema loop
+
+Both halves of the harness now live on `master`. **Phase 2** (`playharness/bga/`)
+is the Playwright layer that points a certified world model at real
+BoardGameArena tables; **Phase 3** (`playharness/agent.py`, `playharness/env.py`)
+is the full Schema deliberation loop that certifies, plans, checks every
+prediction, and repairs the model from counterexamples. The loop is written
+against the abstract `Environment` interface (`playharness/env.py`); the BGA
+adapter and the offline `ReferenceEnv` both satisfy it, so the same loop runs
+against a live table or an offline reference model unchanged.
 
 **Phase 3 exit criterion (2026-07-24)**: starting from *only* the Reversi
 rulebook spec — `world_model.py` deleted, `python -m playharness.live reversi
@@ -21,10 +30,8 @@ declaring it is observation, not leaked dynamics — the preconditions and
 effects of actions are still learned from recorded play. Game 2 ran clean on
 the standing model → converged.
 
-**Phase 3 (2026-07-23)**: the deliberation cycle runs end to end against an
-`Environment` interface (`playharness/env.py`) that the Phase 2 BGA adapter
-will later implement — for now an offline `ReferenceEnv` stands in for BGA.
-The agent loop (`playharness/agent.py`) enforces the Schema discipline live:
+**Phase 3 (2026-07-23)**: the deliberation cycle runs end to end against the
+`Environment` interface. The agent loop enforces the Schema discipline live:
 the backtest gates planning; every committed action and every observed
 opponent move is checked against `step()`'s prediction; one misprediction
 voids the plan and re-enters deliberation with a recorded counterexample;
@@ -34,15 +41,14 @@ probes off the planner's line while the model is still being falsified.
 Convergence = a full game with zero deliberations plus a green backtest over
 every recorded game.
 
-Validated on Reversi with the Phase 1–certified model resumed: clean games
-from both seats (60 transitions, 0 mispredictions, 0 rejections), and the
-whole loop is covered by offline tests using scripted theorizers (a buggy
-model is caught mid-game by a live misprediction, repaired, and the game
-recovers its position by replaying the Timeline). The from-rulebook-only
-games-to-green measurement (`python -m playharness.live reversi --fresh`)
-needs an `ANTHROPIC_API_KEY` and is the run reported above (2 games to green).
+**Phase 2 (BGA adapter)**: the Playwright layer that points the certified
+world model at real BoardGameArena tables — login with a persisted browser
+session, table navigation, observation via BGA's structured client state
+(`window.gameui.gamedatas`, with a screenshot fallback), a data-driven UI map
+(model action → DOM selector), and per-step prediction checks. Live BGA play
+confirmed on Reversi. See "Playing on BGA" below.
 
-## Phase 1 (2026-07-18): rulebook → certified model (offline)
+## Phase 1 complete — rulebook → certified model (offline)
 
 **Exit criteria met for Reversi** (2026-07-18): starting from only
 `rulebook.md`, the pipeline extracted the spec, generated `world_model.py`,
@@ -101,15 +107,68 @@ offline halves of ingestion/generation, the environment contract, and the
 full Phase 3 deliberation loop (scripted theorizers stand in for Claude, so
 misprediction/rejection/repair/convergence paths all run offline).
 
+## Playing on BGA (Phase 2)
+
+Credentials come from the environment; the browser session is persisted to
+`~/.playharness/bga_storage_state.json` so you only authenticate once.
+
+```bash
+pip install -e .                        # adds playwright
+python -m playwright install chromium   # skip if Chromium is already provisioned
+
+export BGA_USERID=... BGA_PASSWORD=...   # BGA_EMAIL / BGA_USERNAME also accepted
+python -m playharness bga-login
+
+# Inspect a table's raw gamedatas + screenshot (useful for building UI maps):
+python -m playharness bga-probe --table <table-id-or-url>
+
+# Create a table (turn-based, manual start — never auto-starts vs a random):
+python -m playharness bga-create reversi          # prints the table id + URL
+
+# Play. Seat a second player in the table's open seat, then:
+python -m playharness bga-play reversi --table <table-id-or-url>
+
+# Offline self-play with the same planner, no BGA needed:
+python -m playharness selfplay reversi --games 10 --depth 3
+```
+
+Set `BGA_HEADLESS=0` to watch the browser.
+
+Every move goes through the Schema-style per-step check: the world model
+predicts the outcome, the action is committed through the UI map
+(`games/reversi/ui_map.json`), the table is re-observed, and the transition is
+appended to `games/reversi/timelines/bga_<ts>.jsonl` — in exactly the entry
+format `run_backtest` replays, so recorded BGA games certify the model
+directly. Opponent moves (and auto-skip chains) are reconstructed by searching
+the model for the legal action sequence that explains the observed board and
+recorded with `"inferred": true`. Any divergence the model cannot explain
+halts the harness with a recorded counterexample and a screenshot (exit code
+2); Phase 3 turns that halt into automated model repair.
+
+Phase 2 known limitations: BGA selector/shape drift may require updating
+`ui_map.json` or `BGAConfig` selector candidates (use `bga-probe` to see what
+the page serves). Running against live BGA also has environment requirements
+(all BGA hosts reachable incl. the `ws-x*` realtime servers, a TLS-1.2 proxy
+cap) and needs a second player, since Reversi has no bot — see
+[docs/LIVE_BGA.md](docs/LIVE_BGA.md).
+
+### Compliance
+
+Automated play may violate BGA's Terms of Use. Use this harness only against
+solo/training modes and unrated tables, with an account clearly used for
+research — never in ranked/arena play or against non-consenting opponents.
+Prefer the offline simulator (`selfplay`) for development.
+
 ## Layout
 
 ```
 playharness/          the harness library
+playharness/bga/      the Playwright BGA adapter (observe / act / record)
 games/<game>/         per-game persistent memory (rulebook, spec, model, timelines, ...)
 tests/                test suite
 ```
 
-Next: the deferred Phase 2 — the Playwright BGA adapter, implementing the
-`Environment` interface against real tables (observe / act / record), so the
-Phase 3 loop drives BGA unchanged; then Phase 4 — chance and
+Next: drive the Phase 3 deliberation loop against the live BGA adapter (the
+`BGAEnv` bridge that adapts the adapter to the `Environment` interface), so
+model repair happens automatically during real play; then Phase 4 — chance and
 hidden-information games (expectimax, determinized MCTS).
