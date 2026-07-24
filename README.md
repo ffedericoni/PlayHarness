@@ -7,7 +7,19 @@ play, and plans inside it. Architecture inspired by
 [Schema](https://schema-harness.github.io/) — see
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design.
 
-## Status: Phase 3 loop wired — full Schema deliberation cycle (offline env)
+## Status: Phase 3 complete — exit criterion met from the rulebook alone
+
+**Phase 3 exit criterion (2026-07-24)**: starting from *only* the Reversi
+rulebook spec — `world_model.py` deleted, `python -m playharness.live reversi
+--fresh` — the full Schema loop reached a green backtest and convergence in
+**2 games** (1 deliberation, 0 mispredictions, 0 rejections, 120 recorded
+transitions; session `games/reversi/sessions/s002/`). The first generation
+certified green on iteration 1 because the interface now declares its action
+wire format (`Environment.action_spec`): the encoding belongs to the interface
+(on BGA the UI map fixes it and the table shows the legal opening moves), so
+declaring it is observation, not leaked dynamics — the preconditions and
+effects of actions are still learned from recorded play. Game 2 ran clean on
+the standing model → converged.
 
 **Phase 3 (2026-07-23)**: the deliberation cycle runs end to end against an
 `Environment` interface (`playharness/env.py`) that the Phase 2 BGA adapter
@@ -28,7 +40,7 @@ whole loop is covered by offline tests using scripted theorizers (a buggy
 model is caught mid-game by a live misprediction, repaired, and the game
 recovers its position by replaying the Timeline). The from-rulebook-only
 games-to-green measurement (`python -m playharness.live reversi --fresh`)
-needs an `ANTHROPIC_API_KEY`.
+needs an `ANTHROPIC_API_KEY` and is the run reported above (2 games to green).
 
 ## Phase 1 (2026-07-18): rulebook → certified model (offline)
 
