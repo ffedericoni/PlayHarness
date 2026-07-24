@@ -13,10 +13,14 @@ Both halves of the harness now live on `master`. **Phase 2** (`playharness/bga/`
 is the Playwright layer that points a certified world model at real
 BoardGameArena tables; **Phase 3** (`playharness/agent.py`, `playharness/env.py`)
 is the full Schema deliberation loop that certifies, plans, checks every
-prediction, and repairs the model from counterexamples. The loop is written
-against the abstract `Environment` interface (`playharness/env.py`); the BGA
-adapter and the offline `ReferenceEnv` both satisfy it, so the same loop runs
-against a live table or an offline reference model unchanged.
+prediction, and repairs the model from counterexamples.
+
+They are merged but not yet fused: the Phase 3 loop runs against the abstract
+`Environment` interface (`playharness/env.py`), which the offline `ReferenceEnv`
+satisfies; the Phase 2 `BGAAdapter` currently exposes its own self-contained
+observe/sync/commit loop with its own per-step check. The remaining work is a
+thin `BGAEnv` bridge so the Phase 3 deliberation loop drives live tables
+directly (see "Next").
 
 **Phase 3 exit criterion (2026-07-24)**: starting from *only* the Reversi
 rulebook spec — `world_model.py` deleted, `python -m playharness.live reversi
