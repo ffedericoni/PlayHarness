@@ -172,7 +172,13 @@ games/<game>/         per-game persistent memory (rulebook, spec, model, timelin
 tests/                test suite
 ```
 
-Next: drive the Phase 3 deliberation loop against the live BGA adapter (the
-`BGAEnv` bridge that adapts the adapter to the `Environment` interface), so
-model repair happens automatically during real play; then Phase 4 — chance and
-hidden-information games (expectimax, determinized MCTS).
+Next: fuse Phase 2 and Phase 3 so the deliberation loop drives live BGA tables.
+The chosen approach lifts opponent-action inference *into* the loop: on BGA
+only the resulting board is observed, never the opponent's action in the
+model's encoding, so the `Environment` contract will return opponent moves as
+raw board observations and the Phase 3 loop — which holds the model — names
+them (today `BGAAdapter.infer_action_path` does this reconstruction inside the
+adapter, and `ReferenceEnv` sidesteps it by being the reference model). That
+puts every use of the model, including reconstructing reality, under the same
+falsifiable loop. Then Phase 4 — chance and hidden-information games
+(expectimax, determinized MCTS).
