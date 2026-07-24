@@ -24,19 +24,27 @@ def test_reset_opponent_moves_first(tictactoe):
     _, obs, events = env.reset()
     assert obs["board"] == [None] * 9          # init obs precedes opponent play
     assert len(events) == 1
-    assert events[0].player == 0
-    assert events[0].action == {"type": "place", "cell": 0}
+    # The opponent move is a RAW board observation: action/player unset, for the
+    # loop to name by inference (as it must on BGA).
+    assert events[0].action is None and events[0].player is None
     assert events[0].observation["board"][0] == "X"
     assert events[0].observation["to_move"] == 1
 
 
-def test_act_returns_own_then_opponent_events(tictactoe):
+def test_act_returns_named_own_then_raw_opponent(tictactoe):
     env = ReferenceEnv(tictactoe, agent_seat=0, opponent_policy=first_empty)
     env.reset()
     events = env.act({"type": "place", "cell": 4})
-    assert [e.player for e in events] == [0, 1]
-    assert events[0].observation["board"][4] == "X"
-    assert events[1].observation["board"][0] == "O"   # first empty cell
+    assert len(events) == 2
+    own, opponent = events
+    # Our own move is named (we chose the action); its observation is the board
+    # right after it, before the opponent replied.
+    assert own.player == 0 and own.action == {"type": "place", "cell": 4}
+    assert own.observation["board"][4] == "X" and own.observation["board"][0] is None
+    # The opponent's reply comes back as a raw board only.
+    assert opponent.player is None and opponent.action is None
+    assert opponent.observation["board"][0] == "O"   # first empty cell
+    assert opponent.observation["board"][4] == "X"
 
 
 def test_illegal_action_rejected_without_advancing(tictactoe):

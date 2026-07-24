@@ -41,6 +41,7 @@ from .backtest import diff_paths
 from .env import Environment, IllegalActionError, TransitionEvent
 from .modelgen import certify
 from .planner import Policy, alphabeta_policy
+from .reconcile import infer_action_path
 from .sandbox import SandboxedModel, SandboxError
 from .timeline import Timeline
 
@@ -127,11 +128,6 @@ def _last_observation(timeline: Timeline) -> dict | None:
     return obs
 
 
-def _record(timeline: Timeline, event: TransitionEvent) -> None:
-    timeline.append("transition", player=event.player, action=event.action,
-                    observation=event.observation)
-
-
 def _replay(model: SandboxedModel, timeline: Timeline) -> dict:
     """Re-derive the current state by replaying this game's record through the
     model — how the agent recovers its position after a mid-game repair."""
@@ -146,29 +142,117 @@ def _replay(model: SandboxedModel, timeline: Timeline) -> dict:
     return state
 
 
-def _check_events(model: SandboxedModel, state: dict,
-                  events: list[TransitionEvent]) -> tuple[dict | None, str | None]:
-    """Advance ``state`` through observed reality, checking every prediction.
+def _name_path(model: SandboxedModel, path: list, final_obs: dict) -> list[dict]:
+    """Turn an inferred action path into ready-to-record transition kwargs.
 
-    Returns ``(new_state, None)`` if the model predicted every observation, or
-    ``(None, counterexample)`` on the first mismatch (which by then is already
-    recorded, so certification must resolve it).
-    """
-    for event in events:
+    The last transition carries the genuinely-observed ``final_obs``; the
+    intermediate ones the model's own observation of the state it derived. All
+    are flagged ``inferred`` — the model, not reality, named them."""
+    out = []
+    for j, (mover, action, next_state) in enumerate(path):
+        last = j == len(path) - 1
+        obs = final_obs if last else model.observation(next_state, None)
+        out.append(dict(player=mover, action=action, observation=obs, inferred=True))
+    return out
+
+
+def _misprediction(event: TransitionEvent, predicted_obs: dict) -> str:
+    paths = diff_paths(event.observation, predicted_obs)
+    return (f"live misprediction at {', '.join(paths)}\n"
+            f"  player {event.player} took action {event.action!r}\n"
+            f"  reality:   {event.observation}\n"
+            f"  predicted: {predicted_obs}")
+
+
+def _inference_failure(model: SandboxedModel, state: dict, event: TransitionEvent) -> str:
+    """Counterexample for a raw observation the model cannot reconstruct.
+
+    Reports the tightest divergence available: among the mover's single legal
+    moves, the one landing closest to reality — usually pinpointing the exact
+    cell(s) the model gets wrong — falling back to the full board delta."""
+    target = event.observation
+    base_obs = model.observation(state, None)
+    best_paths = diff_paths(base_obs, target)
+    best_action = None
+    mover = base_obs.get("to_move")
+    if mover is not None:
         try:
-            state = model.step(state, event.action)
-            predicted = model.observation(state, None)
-        except SandboxError as exc:
-            return None, (f"model failed on observed real transition "
-                          f"(player {event.player}, action {event.action!r}): {exc}")
-        paths = diff_paths(event.observation, predicted)
-        if paths:
-            return None, (
-                f"live misprediction at {', '.join(paths)}\n"
-                f"  player {event.player} took action {event.action!r}\n"
-                f"  reality:   {event.observation}\n"
-                f"  predicted: {predicted}")
-    return state, None
+            for a in model.legal_actions(state, mover):
+                candidate = model.observation(model.step(state, a), None)
+                paths = diff_paths(candidate, target)
+                if paths and (best_action is None or len(paths) < len(best_paths)):
+                    best_paths, best_action = paths, a
+        except SandboxError:
+            pass
+    detail = (f"live misprediction at {', '.join(best_paths)}\n"
+              f"  reality reached an observation the model cannot explain\n")
+    if best_action is not None:
+        detail += f"  closest single move {best_action!r} still diverges there\n"
+    return detail + (f"  reality:   {target}\n"
+                     f"  model at:  {base_obs}")
+
+
+def _reconcile(model: SandboxedModel, state: dict, events: list[TransitionEvent]):
+    """Advance ``state`` through observed reality, naming un-named transitions
+    by inference and checking every named prediction.
+
+    Returns ``(transitions, new_state, counterexample, remaining)``:
+
+    - success — ``(transitions, new_state, None, [])``: every event explained,
+      ``transitions`` ready to record.
+    - failure — ``(transitions, None, counterexample, remaining)``: the model
+      could not explain some event. ``transitions`` (recorded so far, including a
+      backtest-catchable one for a mispredicted *named* action) must still be
+      recorded; then the caller repairs and re-reconciles ``remaining`` from the
+      replayed state.
+    """
+    recorded: list[dict] = []
+    for i, event in enumerate(events):
+        if event.action is not None:
+            # Named transition (the agent's own move). The model must predict
+            # it — possibly followed by moves that slipped in before we observed
+            # (the opponent replied inside the poll window).
+            try:
+                predicted = model.step(state, event.action)
+                predicted_obs = model.observation(predicted, None)
+            except SandboxError as exc:
+                recorded.append(dict(player=event.player, action=event.action,
+                                     observation=event.observation))
+                return recorded, None, (
+                    f"model failed on observed real transition (player "
+                    f"{event.player}, action {event.action!r}): {exc}"), events[i + 1:]
+            if not diff_paths(event.observation, predicted_obs):
+                recorded.append(dict(player=event.player, action=event.action,
+                                     observation=predicted_obs))
+                state = predicted
+                continue
+            try:
+                tail = infer_action_path(model, predicted, event.observation)
+            except SandboxError:
+                tail = None
+            if tail is None:
+                # Unrecoverable misprediction of a KNOWN action: record it
+                # against reality so the backtest itself catches it, too.
+                recorded.append(dict(player=event.player, action=event.action,
+                                     observation=event.observation))
+                return recorded, None, _misprediction(event, predicted_obs), events[i + 1:]
+            recorded.append(dict(player=event.player, action=event.action,
+                                 observation=predicted_obs, observation_inferred=True))
+            recorded.extend(_name_path(model, tail, event.observation))
+            state = tail[-1][2]
+        else:
+            # Raw observation: reality jumped to event.observation; name the
+            # whole transition chain with the model.
+            try:
+                path = infer_action_path(model, state, event.observation)
+            except SandboxError:
+                path = None
+            if path is None:
+                return recorded, None, _inference_failure(model, state, event), events[i:]
+            if path:
+                recorded.extend(_name_path(model, path, event.observation))
+                state = path[-1][2]
+    return recorded, state, None, []
 
 
 def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
@@ -193,9 +277,10 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
 
     config, initial_obs, events = env.reset()
     timeline.append("init", config=config, observation=initial_obs)
-    for event in events:
-        _record(timeline, event)
-    report.transitions += len(events)
+    # Opponent moves that preceded our first turn are raw observations — they
+    # can only be named once a model exists, so hold them until after the first
+    # certification rather than recording them now.
+    pending: list[TransitionEvent] = list(events)
 
     model: SandboxedModel | None = None
     state: dict | None = None
@@ -229,6 +314,25 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
         model = SandboxedModel(model_path, call_timeout=call_timeout)
         state = _replay(model, timeline)
 
+    def reconcile(observed: list[TransitionEvent]) -> None:
+        """Fold observed reality into the record, naming opponent moves by
+        inference and checking every prediction, repairing on any misprediction
+        until reality is fully explained. Advances ``state``."""
+        nonlocal state
+        todo = list(observed)
+        while todo:
+            transitions, new_state, counterexample, remaining = _reconcile(model, state, todo)
+            for kwargs in transitions:
+                timeline.append("transition", **kwargs)
+            report.transitions += len(transitions)
+            if counterexample is None:
+                state = new_state
+                return
+            report.mispredictions += 1
+            deliberate("misprediction", counterexample)
+            reopen()  # model repaired; state re-derived from the record
+            todo = remaining
+
     # The action wire format is interface knowledge, not hidden dynamics —
     # rejections deliberately reveal nothing, so it must be declared up front
     # or a wrong encoding could never be repaired from live play alone.
@@ -247,6 +351,9 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
     reopen()
 
     try:
+        # Now that a model exists, name the opponent's opening play (if any).
+        reconcile(pending)
+
         while not env.is_terminal():
             if report.moves >= max_moves:
                 raise RuntimeError(f"game exceeded {max_moves} agent moves")
@@ -287,18 +394,10 @@ def play_game(env: Environment, game_dir: str | Path, timeline_path: str | Path,
                 continue
             report.moves += 1
 
-            # record first — reality enters the Timeline unconditionally —
-            # then check every prediction against it
-            for event in events:
-                _record(timeline, event)
-            report.transitions += len(events)
-            new_state, counterexample = _check_events(model, state, events)
-            if counterexample is not None:
-                report.mispredictions += 1
-                deliberate("misprediction", counterexample)
-                reopen()
-            else:
-                state = new_state
+            # Fold reality into the record: our own move is checked against the
+            # prediction; the opponent's raw board is named by inference. A move
+            # the model cannot explain repairs it, then reconciliation resumes.
+            reconcile(events)
 
         # game over: final scores are ground truth too
         report.scores = env.scores()

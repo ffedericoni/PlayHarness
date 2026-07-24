@@ -9,8 +9,17 @@ its internal state, its legal-action list, or its dynamics.
 An environment hosts ONE game. The agent owns one seat; the environment plays
 every other seat (on BGA: the actual opponents). After ``reset()`` and after
 every ``act()``, the environment advances opponents until it is the agent's
-turn or the game is over, reporting each opponent move as an observed
-:class:`TransitionEvent` — the equivalent of BGA's per-move notifications.
+turn or the game is over, reporting what changed as :class:`TransitionEvent`\\ s.
+
+The agent's own move is a *named* event (the loop chose the action, so it is
+known). Opponent moves are reported as **raw board observations** — action and
+player left unset — because that is all reality reveals on BGA: you see the
+resulting board, never the opponent's action in the model's encoding. Naming
+those transitions is the deliberation loop's job (:mod:`playharness.agent`
+searches the model for the legal sequence that explains the board). That keeps
+every use of the model, including reconstructing reality, under the same
+falsifiable loop, and lets an offline :class:`ReferenceEnv` and a live BGA
+table share one interface.
 """
 
 from __future__ import annotations
@@ -30,13 +39,19 @@ class IllegalActionError(Exception):
 
 @dataclass
 class TransitionEvent:
-    """One observed real transition: ``player`` took ``action``, and reality
-    then looked like ``observation`` (omniscient viewpoint for
-    perfect-information games, matching the Timeline/backtest convention)."""
+    """One observed change in reality: after it, reality looked like
+    ``observation`` (omniscient viewpoint for perfect-information games,
+    matching the Timeline/backtest convention).
 
-    player: int
-    action: dict
+    ``player`` and ``action`` are set only when the mover and its action are
+    known in the model's encoding — the agent's own committed move. For opponent
+    moves they stay ``None``: reality reported a raw board and the loop must name
+    the transition(s) by inference. So ``action is None`` means "reality reached
+    this observation; reconstruct how"."""
+
     observation: dict
+    player: int | None = None
+    action: dict | None = None
 
 
 class Environment(Protocol):
@@ -55,15 +70,17 @@ class Environment(Protocol):
 
     def reset(self) -> tuple[dict, dict, list[TransitionEvent]]:
         """Start the game. Returns ``(config, initial_observation, events)``
-        where ``events`` are opponent moves played before the agent's first
-        turn (empty if the agent moves first)."""
+        where ``events`` are the opponent moves played before the agent's first
+        turn — raw observations for the loop to name (empty if the agent moves
+        first)."""
         ...
 
     def act(self, action: dict) -> list[TransitionEvent]:
         """Commit the agent's action. Raises :class:`IllegalActionError` if
         reality rejects it (the game does not advance). Otherwise returns the
-        agent's own transition followed by opponent transitions up to the
-        agent's next turn or the end of the game."""
+        agent's own (named) transition followed by the opponent's play up to the
+        agent's next turn or the end of the game, reported as raw board
+        observations for the loop to name."""
         ...
 
     def is_terminal(self) -> bool: ...
@@ -122,8 +139,8 @@ class ReferenceEnv:
             raise IllegalActionError(f"illegal action: {action!r}")
         self._state = self.reference.step(state, action)
         self._moves += 1
-        own = TransitionEvent(self.agent_seat, action,
-                              self.reference.observation(self._state, None))
+        own = TransitionEvent(self.reference.observation(self._state, None),
+                              player=self.agent_seat, action=action)
         return [own] + self._advance_opponents()
 
     def is_terminal(self) -> bool:
@@ -144,8 +161,8 @@ class ReferenceEnv:
         return self._state
 
     def _advance_opponents(self) -> list[TransitionEvent]:
-        events: list[TransitionEvent] = []
         state = self._require_state()
+        moved = False
         while (not self.reference.is_terminal(state)
                and state["to_move"] != self.agent_seat):
             if self._moves >= self.max_moves:
@@ -155,7 +172,12 @@ class ReferenceEnv:
             action = self.opponent_policy(self.reference, state, mover)
             state = self.reference.step(state, action)
             self._moves += 1
-            events.append(TransitionEvent(
-                mover, action, self.reference.observation(state, None)))
+            moved = True
         self._state = state
-        return events
+        if not moved:
+            return []
+        # Report ONLY the resulting board — the loop names the move(s) by
+        # inference, exactly as it must on BGA where the opponent's action is
+        # never observed. Truthfully naming them here would let the offline env
+        # sidestep the very reconstruction the live path depends on.
+        return [TransitionEvent(self.reference.observation(state, None))]

@@ -167,6 +167,49 @@ def cmd_bga_play(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_bga_live(args: argparse.Namespace) -> int:
+    """Drive a live BGA table with the full Phase 3 Schema loop.
+
+    Unlike ``bga-play`` (Phase 2's self-contained observe/predict/commit loop),
+    this points ``play_game`` — certify, plan, check every prediction, repair
+    from counterexamples — at a live table through :class:`BGAEnv`. The model is
+    held by the loop, which names the opponent's moves by inference.
+    """
+    from .agent import claude_theorizer, exploit_policy, play_game
+    from .bga import table as table_mod
+    from .bga.env import BGAEnv
+    from .bga.ui_map import UIMap
+
+    game = args.game
+    game_dir = GAMES_DIR / game
+    ui_map = UIMap.load(game_dir / "ui_map.json")
+
+    session_dir = game_dir / "sessions" / (args.session or "live")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    n = 0
+    while (session_dir / f"game_{n:03d}.jsonl").exists():
+        n += 1
+    timeline_path = session_dir / f"game_{n:03d}.jsonl"
+    past = sorted(str(p) for p in session_dir.glob("game_*.jsonl"))
+
+    with _make_session() as session:
+        session.ensure_logged_in()
+        table_mod.goto_table(session.page, session.config.base_url, args.table)
+        env = BGAEnv(session.page, game, ui_map, game_dir / "screenshots",
+                     move_timeout_s=args.turn_timeout)
+        print(f"recording to {timeline_path}")
+        report = play_game(
+            env, game_dir, timeline_path,
+            past_timelines=[Path(p) for p in past],
+            theorizer=claude_theorizer,
+            policy=exploit_policy(args.depth),
+            call_timeout=args.call_timeout,
+            max_deliberations=args.max_deliberations,
+        )
+        print(report.summary())
+    return 0 if report.scores else 2
+
+
 # -- parser ------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -208,6 +251,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-moves", type=int, default=200)
     p.add_argument("--turn-timeout", type=float, default=600.0)
     p.set_defaults(func=cmd_bga_play)
+
+    p = sub.add_parser("bga-live",
+                       help="play a live BGA table with the full Phase 3 loop "
+                            "(certify, plan, check, repair)")
+    p.add_argument("game", nargs="?", default="reversi")
+    p.add_argument("--table", required=True, help="table URL or numeric table id")
+    p.add_argument("--depth", type=int, default=3, help="alpha-beta search depth")
+    p.add_argument("--session", default=None,
+                   help="session dir under games/<game>/sessions/ (default: live)")
+    p.add_argument("--max-deliberations", type=int, default=8,
+                   help="model-repair budget for the game")
+    p.add_argument("--call-timeout", type=float, default=60.0,
+                   help="per-call wall-clock budget for the sandboxed model")
+    p.add_argument("--turn-timeout", type=float, default=600.0,
+                   help="how long to wait for the opponent before giving up")
+    p.set_defaults(func=cmd_bga_live)
     return parser
 
 

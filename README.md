@@ -7,20 +7,29 @@ play, and plans inside it. Architecture inspired by
 [Schema](https://schema-harness.github.io/) — see
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design.
 
-## Status: Phases 2 & 3 integrated — live BGA adapter + full Schema loop
+## Status: Phases 2 & 3 fused — the Schema loop drives live BGA tables
 
-Both halves of the harness now live on `master`. **Phase 2** (`playharness/bga/`)
-is the Playwright layer that points a certified world model at real
-BoardGameArena tables; **Phase 3** (`playharness/agent.py`, `playharness/env.py`)
-is the full Schema deliberation loop that certifies, plans, checks every
-prediction, and repairs the model from counterexamples.
+Both halves of the harness live on `master` and now run as one. **Phase 3**
+(`playharness/agent.py`, `playharness/env.py`) is the full Schema deliberation
+loop — certify, plan, check every prediction, repair from counterexamples —
+written against the abstract `Environment` interface. **Phase 2**
+(`playharness/bga/`) is the Playwright layer that reaches a real BoardGameArena
+table. The bridge is **`BGAEnv`** (`playharness/bga/env.py`): a *model-free*
+`Environment` that observes the table, commits actions through the UI map, and
+reports the opponent's move as a **raw board observation**. Because it holds no
+model, the deliberation loop — which does — reconstructs the opponent's action
+by inference (`playharness/reconcile.py`), so on a live table the same
+falsifiable loop that plans also names reality. Run it with:
 
-They are merged but not yet fused: the Phase 3 loop runs against the abstract
-`Environment` interface (`playharness/env.py`), which the offline `ReferenceEnv`
-satisfies; the Phase 2 `BGAAdapter` currently exposes its own self-contained
-observe/sync/commit loop with its own per-step check. The remaining work is a
-thin `BGAEnv` bridge so the Phase 3 deliberation loop drives live tables
-directly (see "Next").
+```bash
+python -m playharness bga-live reversi --table <table-id-or-url>
+```
+
+The offline `ReferenceEnv` implements the identical interface (reporting its
+opponents as raw observations too, so the inference path is exercised without a
+browser). `BGAAdapter` — Phase 2's original self-contained observe/sync/commit
+loop — still ships for the standalone `bga-play` command, but `BGAEnv` is the
+fused path the Schema loop runs through.
 
 **Phase 3 exit criterion (2026-07-24)**: starting from *only* the Reversi
 rulebook spec — `world_model.py` deleted, `python -m playharness.live reversi
@@ -78,6 +87,8 @@ random player. The learning curve is the git history of
 | Reference models | `games/tictactoe/`, `games/reversi/` | Hand-written models validating the interfaces |
 | Environment | `playharness/env.py` | What reality looks like to the agent: observe/act/reject; `ReferenceEnv` is the offline BGA stand-in |
 | Agent loop | `playharness/agent.py` | The Schema cycle live: certify-gated planning, per-move prediction checks, counterexample-driven repair |
+| Reconciliation | `playharness/reconcile.py` | Names observed reality by inference: the model reconstructs the opponent's move from the raw board |
+| Live BGA env | `playharness/bga/env.py` | `BGAEnv`: the live table as a model-free `Environment` — the Phase 2/3 bridge |
 | Live pipeline | `playharness/live.py` | `python -m playharness.live reversi --fresh` plays real games until convergence |
 
 ## Running the Phase 1 pipeline
@@ -129,12 +140,21 @@ python -m playharness bga-probe --table <table-id-or-url>
 # Create a table (turn-based, manual start — never auto-starts vs a random):
 python -m playharness bga-create reversi          # prints the table id + URL
 
-# Play. Seat a second player in the table's open seat, then:
+# Play. Seat a second player in the table's open seat, then EITHER:
+
+# (a) the fused Phase 3 loop — certify, plan, check, repair — drives the table:
+python -m playharness bga-live reversi --table <table-id-or-url>
+
+# (b) Phase 2's standalone per-step-check loop with a fixed certified model:
 python -m playharness bga-play reversi --table <table-id-or-url>
 
 # Offline self-play with the same planner, no BGA needed:
 python -m playharness selfplay reversi --games 10 --depth 3
 ```
+
+`bga-live` records each game to `games/reversi/sessions/live/game_NNN.jsonl` and
+will rewrite `world_model.py` from counterexamples if the live table falsifies
+it; `bga-play` instead halts on the first unexplainable divergence (exit code 2).
 
 Set `BGA_HEADLESS=0` to watch the browser.
 
@@ -172,13 +192,12 @@ games/<game>/         per-game persistent memory (rulebook, spec, model, timelin
 tests/                test suite
 ```
 
-Next: fuse Phase 2 and Phase 3 so the deliberation loop drives live BGA tables.
-The chosen approach lifts opponent-action inference *into* the loop: on BGA
-only the resulting board is observed, never the opponent's action in the
-model's encoding, so the `Environment` contract will return opponent moves as
-raw board observations and the Phase 3 loop — which holds the model — names
-them (today `BGAAdapter.infer_action_path` does this reconstruction inside the
-adapter, and `ReferenceEnv` sidesteps it by being the reference model). That
-puts every use of the model, including reconstructing reality, under the same
-falsifiable loop. Then Phase 4 — chance and hidden-information games
-(expectimax, determinized MCTS).
+Next: Phase 4 — chance and hidden-information games (expectimax, determinized
+MCTS). The Phase 2/3 fusion is done: opponent-action inference was lifted *into*
+the loop (`playharness/reconcile.py`). On BGA only the resulting board is
+observed, never the opponent's action in the model's encoding, so the
+`Environment` contract returns opponent moves as raw board observations and the
+loop — which holds the model — names them, putting every use of the model,
+including reconstructing reality, under the same falsifiable check. `BGAEnv` and
+`ReferenceEnv` both speak that contract, so the deliberation loop runs
+unchanged against a live table or the offline stand-in.
